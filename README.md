@@ -1,2 +1,6 @@
-# Murillo et al Analysis
 # Murillo-et-al
+
+These are the scripts that were used for the analyses of WGS and single nuclei sequencing. 
+
+Custom python scripts were written for data wrangling. 
+
