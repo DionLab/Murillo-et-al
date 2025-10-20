@@ -1,0 +1,59 @@
+import pandas as pd
+
+GENES = "genes.txt"   # chr start end gene
+TARGETS = "NRG_CAG6_CAG6C_CTG6_CTG6C_2_mismatch.txt"
+
+OUT_PER_LOCUS = "NRG_2mismatch_genelabelled.bed"        # chr start end gene
+OUT_COLLAPSED  = "NRG_2mismatch_genes_collapsed.bed"    # chr start end gene (unique per gene)
+
+# ---- Load genes (chr start end gene) ----
+genes = pd.read_csv(GENES, sep="\t", header=None, names=["chr","start","end","gene"])
+genes["chr"] = genes["chr"].astype(str).str.strip()
+genes["start"] = genes["start"].astype(int)
+genes["end"] = genes["end"].astype(int)
+
+# ---- Load targets (.txt with 'Chromosome' and 'Position') ----
+targets = pd.read_csv(TARGETS, sep="\t")
+# normalize column names
+targets.columns = [c.strip().lstrip("#") for c in targets.columns]
+if not {"Chromosome","Position"}.issubset(targets.columns):
+    raise ValueError("Could not find 'Chromosome' and 'Position' columns in targets file.")
+
+targets["Chromosome"] = targets["Chromosome"].astype(str).str.strip()
+targets["Position"] = targets["Position"].astype(int)
+
+# ---- Map each locus to overlapping gene(s) ----
+rows = []
+no_gene_counter = 1
+for chrom, pos in zip(targets["Chromosome"], targets["Position"]):
+    gchr = genes[genes["chr"] == chrom]
+    within = gchr[(gchr["start"] <= pos) & (gchr["end"] >= pos)]
+    if not within.empty:
+        # record each overlapping gene using the gene's canonical coords
+        for _, g in within.iterrows():
+            rows.append([chrom, int(g["start"]), int(g["end"]), g["gene"]])
+    else:
+        # small window around the site; name increments
+        rows.append([chrom, max(0, pos-50), pos+50, f"no_gene_{no_gene_counter}"])
+        no_gene_counter += 1
+
+per_locus = pd.DataFrame(rows, columns=["chr","start","end","gene"])
+
+# ---- Write per-locus labelled BED (may have duplicates) ----
+per_locus.sort_values(["chr","start","end","gene"], inplace=True)
+per_locus.to_csv(OUT_PER_LOCUS, sep="\t", header=False, index=False)
+
+# ---- Collapse duplicates to ONE line per gene ----
+# If the same gene appears multiple times, take the min start and max end
+collapsed = (
+    per_locus
+    .groupby(["chr","gene"], as_index=False)
+    .agg(start=("start","min"), end=("end","max"))
+    .loc[:, ["chr","start","end","gene"]]
+    .sort_values(["chr","start","end","gene"])
+)
+
+collapsed.to_csv(OUT_COLLAPSED, sep="\t", header=False, index=False)
+
+print(f"✅ Wrote per-locus BED: {OUT_PER_LOCUS} (n={len(per_locus)})")
+print(f"✅ Wrote collapsed gene-level BED: {OUT_COLLAPSED} (n={len(collapsed)})")
